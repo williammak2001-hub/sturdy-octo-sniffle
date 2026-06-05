@@ -134,4 +134,4 @@ if not race_df.empty:
 
 else:
     st.warning(f"😢 資料庫中目前沒有 {selected_date} 第 {selected_race} 場的歷史賽果數據。")
-    st.info("💡 建議：請先執行 `hkjc_auto_pipeline.py` 將當天數據寫入資料庫，網頁平台就會立刻更新顯現！")
+    st.info("💡 建議：請先執行 `auto_pipeline.py` 將當天數據寫入資料庫，網頁平台就會立刻更新顯現！")
