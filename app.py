@@ -54,6 +54,16 @@ except Exception as e:
 # 4. 【核心】從資料庫動態撈取當天數據，並現場做特徵工程
 @st.cache_data
 def get_live_predictions(date, race_no):
+# ... 撈出 current_race 後 ...
+if not current_race.empty:
+    # 現場計算這場比賽的相對特徵
+    mean_weight = current_race['weight'].mean()
+    mean_speed = current_race['past_avg_seconds'].mean()
+    
+    current_race['weight_vs_average'] = current_race['weight'] - mean_weight
+    current_race['speed_vs_average'] = current_race['past_avg_seconds'] - mean_speed
+    return current_race
+
     try:
         conn = sqlite3.connect('racing_platform.db')
         
@@ -80,6 +90,16 @@ race_df = get_live_predictions(selected_date, selected_race)
 
 # 5. 判斷是否有資料並進行預測
 if not race_df.empty:
+    # 欄位必須跟訓練時完全一致
+    features = race_df[['draw', 'weight_vs_average', 'speed_vs_average']]
+    
+    # XGBRanker 預測出來的是「排序分數」，分數越低（或越小）名次越前
+    race_df['AI_Score'] = real_model.predict(features)
+    
+    # 💡 核心修改：改用 AI_Score 由小到大排序
+    predict_result = race_df.sort_values(by='AI_Score').reset_index(drop=True)
+    predict_result.insert(0, 'AI 推薦名次', range(1, len(predict_result) + 1))
+
     st.subheader(f"📊 正在檢視：{selected_date} ── 第 {selected_race} 場 賽事預測")
     
     # 確保特徵欄位名稱與順序和 XGBoost 完全一致
