@@ -19,13 +19,20 @@ st.divider()
 # 2. 安全加載 XGBoost 模型檔案
 @st.cache_resource 
 def load_xgboost_model():
-    model = xgb.XGBRegressor()
-    model.load_model("xgb_racing_model.json")
+    # 💡 【核心修改】：這裡必須改成 XGBRanker()，才能成功讀取你的新型模型
+    model = xgb.XGBRanker()
+    
+    import os
+    model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "xgb_racing_model.json")
+    model.load_model(model_path)
     return model
+
+# 初始化變數，防止後續報 NameError
+real_model = None
 
 try:
     real_model = load_xgboost_model()
-    st.sidebar.success("🚀 XGBoost 核心模型加載成功！")
+    st.sidebar.success("🚀 XGBoost 核心排序模型加載成功！")
 except Exception as e:
     st.sidebar.error(f"❌ 模型加載失敗，請先運行 train_and_export.py: {e}")
 
@@ -82,27 +89,30 @@ race_df = get_live_predictions(selected_date, selected_race)
 
 # 5. 判斷是否有資料並進行預測
 if not race_df.empty:
-    # 欄位必須跟訓練時完全一致
-    features = race_df[['draw', 'weight_vs_average', 'speed_vs_average']]
-    
-    # XGBRanker 預測出來的是「排序分數」，分數越低（或越小）名次越前
-    race_df['AI_Score'] = real_model.predict(features)
-    
-    # 💡 核心修改：改用 AI_Score 由小到大排序
-    predict_result = race_df.sort_values(by='AI_Score').reset_index(drop=True)
-    predict_result.insert(0, 'AI 推薦名次', range(1, len(predict_result) + 1))
-
+    if real_model is None:
+        st.error("🧠 AI 預測大腦尚未就緒（模型檔案載入失敗）。")
+        st.stop()
+        
     st.subheader(f"📊 正在檢視：{selected_date} ── 第 {selected_race} 場 賽事預測")
     
-    # 確保特徵欄位名稱與順序和 XGBoost 完全一致
-    # 訓練時用的英文：['draw', 'weight', 'past_avg_seconds']
-    features = race_df[['draw', 'weight', 'past_avg_seconds']]
+    # 💡 確保特徵欄位與你新版訓練模型完全一致
+    # 如果你新版訓練用了相對特徵，請確保這裡有 ['draw', 'weight_vs_average', 'speed_vs_average']
+    # 如果你只是先測試，請對齊你 train_and_export.py 的特徵
+    feature_cols = ['draw', 'weight_vs_average', 'speed_vs_average']
     
-    # 讓 AI 大腦預測這場比賽
-    race_df['AI 預測秒數'] = real_model.predict(features)
+    # 檢查欄位是否存在，如果不存在就現場補算
+    if 'weight_vs_average' not in race_df.columns:
+        race_df['weight_vs_average'] = race_df['weight'] - race_df['weight'].mean()
+    if 'speed_vs_average' not in race_df.columns:
+        race_df['speed_vs_average'] = race_df['past_avg_seconds'] - race_df['past_avg_seconds'].mean()
+
+    features = race_df[feature_cols]
     
-    # 排序與美化展示
-    predict_result = race_df.sort_values(by='AI 預測秒數').reset_index(drop=True)
+    # 讓 AI Ranker 大腦預測這場比賽的分數
+    race_df['AI_Score'] = real_model.predict(features)
+    
+    # 💡 排序與美化展示：XGBRanker 分數越低，排名越前
+    predict_result = race_df.sort_values(by='AI_Score').reset_index(drop=True)
     predict_result.insert(0, 'AI 推薦名次', range(1, len(predict_result) + 1))
     
     # 欄位中文化展示
@@ -116,11 +126,11 @@ if not race_df.empty:
     # 呈現前三名卡片
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.metric(label="🥇 AI 首選獨贏", value=predict_result.loc[0, '馬名'], delta=f"{predict_result.loc[0, 'AI 預測秒數']:.2f} 秒")
+        st.metric(label="🥇 AI 首選獨贏", value=predict_result.loc[0, '馬名'], delta="最具勝出邊緣")
     with col2:
-        st.metric(label="🥈 次選位置", value=predict_result.loc[1, '馬名'], delta=f"{predict_result.loc[1, 'AI 預測秒數']:.2f} 秒")
+        st.metric(label="🥈 次選位置", value=predict_result.loc[1, '馬名'], delta="威脅力強")
     with col3:
-        st.metric(label="🥉 三選位置", value=predict_result.loc[2, '馬名'], delta=f"{predict_result.loc[2, 'AI 預測秒數']:.2f} 秒")
+        st.metric(label="🥉 三選位置", value=predict_result.loc[2, '馬名'], delta="可作配腳")
         
     # 顯示高亮數據表格
     st.markdown("### 📋 完整 AI 評分與預測數據表")
@@ -130,7 +140,7 @@ if not race_df.empty:
         elif val == 3: return 'background-color: #CD7F32; color: black; font-weight: bold;'
         return ''
         
-    st.dataframe(predict_result[['AI 推薦名次', '馬名', '檔位', '實際負磅', 'AI 預測秒數']].style.map(highlight_top3, subset=['AI 推薦名次']), width='stretch')
+    st.dataframe(predict_result[['AI 推薦名次', '馬名', '檔位', '實際負磅', 'AI_Score']].style.map(highlight_top3, subset=['AI 推薦名次']), width='stretch')
 
 else:
     st.warning(f"😢 資料庫中目前沒有 {selected_date} 第 {selected_race} 場的歷史賽果數據。")
