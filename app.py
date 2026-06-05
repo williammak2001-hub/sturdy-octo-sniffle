@@ -54,35 +54,27 @@ except Exception as e:
 # 4. 【核心】從資料庫動態撈取當天數據，並現場做特徵工程
 @st.cache_data
 def get_live_predictions(date, race_no):
-# ... 撈出 current_race 後 ...
-if not current_race.empty:
-    # 現場計算這場比賽的相對特徵
-    mean_weight = current_race['weight'].mean()
-    mean_speed = current_race['past_avg_seconds'].mean()
-    
-    current_race['weight_vs_average'] = current_race['weight'] - mean_weight
-    current_race['speed_vs_average'] = current_race['past_avg_seconds'] - mean_speed
-    return current_race
-
     try:
         conn = sqlite3.connect('racing_platform.db')
         
-        # 💡 實戰策略：撈取當天這場比賽的所有馬匹
+        # 💡 撈取當天這場比賽的所有馬匹
         query = f"SELECT * FROM race_results WHERE race_date = '{date}' AND race_no = {race_no}"
         current_race = pd.read_sql_query(query, conn)
         
-        if current_race.empty:
-            # 防呆機制：如果資料庫查無此場，回傳空表
-            return pd.DataFrame()
+        # 檢查點：確保下面這段 if 區塊，比 try 再向右縮進 4 個空格
+        if not current_race.empty:
+            # 現場計算這場比賽的相對特徵（新加入的 XGBRanker 特徵）
+            mean_weight = current_race['weight'].mean()
+            mean_speed = current_race['past_avg_seconds'].mean()
             
-        # 💡 特徵工程：現場計算這匹馬在歷史大表裡的平均秒數
-        # 在這裡為了示範，如果資料庫剛建立、歷史數據不夠，我們自動填入基準值，實戰中會用前幾次跑的平均
-        if 'past_avg_seconds' not in current_race.columns:
-            current_race['past_avg_seconds'] = current_race['finish_seconds'].fillna(107.50)
+            current_race['weight_vs_average'] = current_race['weight'] - mean_weight
+            current_race['speed_vs_average'] = current_race['past_avg_seconds'] - mean_speed
             
         conn.close()
-        return current_race
-    except:
+        return current_race  # 確保這行在 try 裡面
+        
+    except Exception as e:
+        # 如果出錯，回傳空表避免崩潰
         return pd.DataFrame()
 
 # 執行資料讀取
