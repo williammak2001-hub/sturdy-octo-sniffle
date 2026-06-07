@@ -12,6 +12,7 @@ db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'racing_platf
 conn = sqlite3.connect(db_path)
 cursor = conn.cursor()
 
+# === 🗄️ 1. 初始化 SQLite 資料庫 ===
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS race_results (
         race_date TEXT,
@@ -22,10 +23,16 @@ cursor.execute('''
         weight INTEGER,
         finish_seconds REAL,
         past_avg_seconds REAL,
+        jockey TEXT,          -- 💡 新增：騎師
+        trainer TEXT,         -- 💡 新增：練馬師
+        rating_change INTEGER, -- 💡 新增：評分變動 (+/-)
+        body_weight INTEGER,   -- 💡 新增：排位體重
+        recent_form TEXT,     -- 💡 新增：6次近績 (字串，如 1/5/2/2/5/9)
         PRIMARY KEY (race_date, race_no, horse_name)
     )
 ''')
 conn.commit()
+
 print("資料庫結構就緒！")
 
 print("\n" + "="*50 + "\n")
@@ -45,7 +52,6 @@ headers = {
 
 # 偵測正確的網址格式 (優先測試標準版)
 valid_date_param = None
-use_text_version = False
 print("🔍 正在自動探測馬會伺服器的網址日期格式...")
 
 for fmt in [f"{target_date.split('-')[0]}/{target_date.split('-')[1]}/{target_date.split('-')[2]}"]:
@@ -79,11 +85,9 @@ for race_no in range(1, 12):
             
         tables = pd.read_html(io.StringIO(response.text))
         
-        # 💡 【核心修正】：我們不再用 break 盲目拿第一個表格，而是把所有可能包含參賽馬的列都蒐集起來
         potential_rows = []
         
         for t in tables:
-            # 重整欄位名稱為字串
             if isinstance(t.columns, pd.MultiIndex):
                 t.columns = ['_'.join(col).strip() for col in t.columns]
             else:
@@ -91,35 +95,62 @@ for race_no in range(1, 12):
                 
             cols_str = "".join(t.columns)
             
-            # 偵測這張表格是不是排位主表
+            # 偵測是否為主排位表
             if '馬名' in cols_str or '馬 名' in cols_str:
-                # 找出欄位索引
                 cols = list(t.columns)
                 name_idx = next((i for i, c in enumerate(cols) if '馬名' in c or '馬 名' in c), None)
                 draw_idx = next((i for i, c in enumerate(cols) if '檔位' in c or '檔 位' in c), None)
                 weight_idx = next((i for i, c in enumerate(cols) if '負磅' in c or '負 磅' in c), None)
                 
+                # 💡 動態偵測新欄位索引
+                jockey_idx = next((i for i, c in enumerate(cols) if '騎師' in c or '騎 師' in c), None)
+                trainer_idx = next((i for i, c in enumerate(cols) if '練馬師' in c or '練馬' in c), None)
+                rating_idx = next((i for i, c in enumerate(cols) if '評分+/-' in c or '評分 +/-' in c), None)
+                bweight_idx = next((i for i, c in enumerate(cols) if '排位體重' in c or '體重' in c), None)
+                form_idx = next((i for i, c in enumerate(cols) if '6次近績' in c or '近績' in c), None)
+                
                 if name_idx is not None:
                     for _, row in t.iterrows():
                         try:
                             h_name = str(row.iloc[name_idx]).strip()
-                            # 過濾掉雜訊、表頭字眼或空的行
-                            if h_name == '' or 'NaN' in h_name or '馬名' in h_name or '馬 名' in h_name or '後備馬匹' in h_name:
+                            
+                            # 【精準過濾】排除空行、標頭、以及後備/退出馬匹的提示字
+                            if h_name in ['', 'NaN', 'nan', '馬名', '馬 名'] or '後備' in h_name or '退出' in h_name:
                                 continue
                             
                             # 清洗馬名
                             h_name = re.sub(r'^\d+', '', h_name) 
                             h_name = re.sub(r'\(.*?\)', '', h_name).strip() 
-                            if len(h_name) < 2 or h_name.isdigit(): # 防止抓到奇怪的純數字
+                            h_name = re.sub(r'\[.*?\]', '', h_name).strip() 
+                            
+                            if len(h_name) < 2 or h_name.isdigit(): 
                                 continue
                                 
                             # 檔位與負磅提取
-                            d_val = str(row.iloc[draw_idx]).strip() if draw_idx is not None else "1"
-                            draw = int(float(d_val)) if d_val.replace('.0','').isdigit() else 1
+                            d_val = str(row.iloc[draw_idx]).strip() if draw_idx is not None else ""
+                            if d_val in ['', 'NaN', 'nan', '---'] or '後備' in d_val:
+                                continue
+                            draw = int(float(d_val)) if d_val.replace('.0','').isdigit() else None
+                            if draw is None: continue 
                             
                             w_val = str(row.iloc[weight_idx]).strip() if weight_idx is not None else "120"
                             weight = int(float(w_val)) if w_val.replace('.0','').isdigit() else 120
                             
+                            # 💡 安全提取新欄位數據（移至變數定義之後）
+                            jockey_val = str(row.iloc[jockey_idx]).strip() if jockey_idx is not None else ""
+                            jockey_val = re.sub(r'\(.*?\)', '', jockey_val).strip() # 移除減磅標記如 (-10)
+
+                            trainer_val = str(row.iloc[trainer_idx]).strip() if trainer_idx is not None else ""
+
+                            r_change = str(row.iloc[rating_idx]).strip() if rating_idx is not None else "0"
+                            rating_change = int(r_change) if r_change.replace('-','').replace('+','').isdigit() else 0
+
+                            b_w = str(row.iloc[bweight_idx]).strip() if bweight_idx is not None else "1100"
+                            body_weight = int(b_w) if b_w.isdigit() else 1100
+
+                            form_val = str(row.iloc[form_idx]).strip() if form_idx is not None else ""
+
+                            # 統一打包儲存
                             potential_rows.append({
                                 'race_date': formatted_date_db,
                                 'race_no': race_no,
@@ -128,12 +159,21 @@ for race_no in range(1, 12):
                                 'draw': draw,
                                 'weight': weight,
                                 'finish_seconds': 0.0,
-                                'past_avg_seconds': 107.50
+                                'past_avg_seconds': 107.50,
+                                'jockey': jockey_val,          
+                                'trainer': trainer_val,        
+                                'rating_change': rating_change,
+                                'body_weight': body_weight,    
+                                'recent_form': form_val        
                             })
-                        except:
+                        except Exception as row_e:
                             continue
+                            
+                # 抓完真正的正選排位表後，立刻跳出
+                if len(potential_rows) > 0:
+                    break
 
-        # 移除重複抓到的馬匹 (防止同一個網頁多個表格重複計算)
+        # 移除重複抓到的馬匹
         seen_horses = set()
         unique_race_rows = []
         for r in potential_rows:
@@ -163,10 +203,11 @@ if all_card_races:
     
     insert_sql = '''
         INSERT OR REPLACE INTO race_results (
-            race_date, race_no, actual_rank, horse_name, draw, weight, finish_seconds, past_avg_seconds
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            race_date, race_no, actual_rank, horse_name, draw, weight, finish_seconds, past_avg_seconds,
+            jockey, trainer, rating_change, body_weight, recent_form
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     '''
-    
+
     data_tuples = []
     for _, row in today_scraped_data.iterrows():
         data_tuples.append((
@@ -177,13 +218,18 @@ if all_card_races:
             int(row['draw']),
             int(row['weight']),
             float(row['finish_seconds']),
-            float(row['past_avg_seconds'])
+            float(row['past_avg_seconds']),
+            row['jockey'],
+            row['trainer'],
+            int(row['rating_change']),
+            int(row['body_weight']),
+            row['recent_form']
         ))
     
     try:
         cursor.executemany(insert_sql, data_tuples)
         conn.commit()
-        print("🎉 資料庫完美同步！這次 12 匹馬應該都進去了！")
+        print(f"🎉 資料庫完美同步！這次 {len(data_tuples)} 筆馬匹的新欄位數據全部成功進去了！")
     except Exception as e:
         print(f"❌ 寫入失敗: {e}")
 else:
