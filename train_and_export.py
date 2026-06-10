@@ -36,11 +36,32 @@ race_means = history_df.groupby('race_id')[['weight', 'past_avg_seconds']].trans
 history_df['weight_vs_average'] = history_df['weight'] - race_means['weight']
 history_df['speed_vs_average'] = history_df['past_avg_seconds'] - race_means['past_avg_seconds']
 
+# ==========================================================
+# 🛡️ 欄位安全檢查：如果歷史資料庫缺少某些欄位，自動用預設值補齊，防止 KeyError
+# ==========================================================
+if 'recent_form' not in history_df.columns:
+    print("⚠️ 警告：資料庫中找不到 'recent_form' 欄位，自動補齊預設值。")
+    history_df['recent_form'] = '---'
+
+if 'jockey' not in history_df.columns:
+    print("⚠️ 警告：資料庫中找不到 'jockey' 欄位，自動補齊預設值。")
+    history_df['jockey'] = '未知騎師'
+
+if 'trainer' not in history_df.columns:
+    print("⚠️ 警告：資料庫中找不到 'trainer' 欄位，自動補齊預設值。")
+    history_df['trainer'] = '未知練馬師'
+
+if 'rating_change' not in history_df.columns:
+    history_df['rating_change'] = 0
+
+if 'body_weight' not in history_df.columns:
+    history_df['body_weight'] = 1100
+# ==========================================================
+
 # 💡 6. 轉化近績：將字串近績（如 1/2/4/11）轉化為近三場平均名次的純數字
 def calculate_recent_rank_mean(form_str):
     if not form_str or pd.isna(form_str) or form_str in ['---', '']:
         return 6.0
-    import re
     ranks = [int(s) for s in str(form_str).split('/') if s.isdigit()]
     if not ranks:
         return 6.0
