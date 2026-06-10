@@ -124,6 +124,7 @@ if not race_df.empty:
     st.subheader(f"📊 正在檢視：{selected_date} ── 第 {selected_race} 場 賽事預測")
     
     # 💡 升級後的超強預測特徵矩陣！欄位順序必須與你重新訓練模型時完全一致！
+    #  新代碼：強制將 8 個特徵欄位清洗為純數字，防止 XGBoost 報錯
     feature_cols = [
         'draw', 
         'weight_vs_average', 
@@ -135,7 +136,25 @@ if not race_df.empty:
         'trainer_win_rate'
     ]
 
-    features = race_df[feature_cols]
+    # 1. 複製一份特徵矩陣，避免動到原始 race_df
+    features = race_df[feature_cols].copy()
+    
+    # 2. 逐一強制轉換成數字型態 (如果有無法轉型成功的字串，會變成 NaN)
+    for col in feature_cols:
+        features[col] = pd.to_numeric(features[col], errors='coerce')
+        
+    # 3. 智能填補缺失值 (NaN)，確保大腦讀到的是完整純數字矩陣
+    features['draw'] = features['draw'].fillna(7).astype(int)                        # 檔位缺失預設中檔
+    features['weight_vs_average'] = features['weight_vs_average'].fillna(0.0).astype(float)
+    features['speed_vs_average'] = features['speed_vs_average'].fillna(0.0).astype(float)
+    features['rating_change'] = features['rating_change'].fillna(0).astype(int)
+    features['body_weight'] = features['body_weight'].fillna(1100).astype(int)       # 體重缺失給平均體重
+    features['recent_avg_rank'] = features['recent_avg_rank'].fillna(6.0).astype(float) # 沒近績的新馬給 6 名
+    features['jockey_win_rate'] = features['jockey_win_rate'].fillna(0.08).astype(float)
+    features['trainer_win_rate'] = features['trainer_win_rate'].fillna(0.08).astype(float)
+    
+    # 4. 放心交給大腦進行預測
+    race_df['AI_Score'] = real_model.predict(features)
     
     # 讓 AI Ranker 大腦預測這場比賽的分數
     race_df['AI_Score'] = real_model.predict(features)
