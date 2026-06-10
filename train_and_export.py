@@ -4,7 +4,7 @@ import numpy as np
 
 print("=== 📦 1. 載入並準備歷史數據 (完全體 8 特徵大腦升級) ===")
 
-# 為了讓新大腦順利擁有 8 個輸入特徵的記憶，我們在模擬的歷史庫中直接加入這些新特徵
+# 💡 在模擬的歷史庫中直接加入這些新特徵，讓新大腦順利擁有 8 個輸入特徵的記憶
 history_df = pd.DataFrame({
     'race_id': [1, 1, 1, 1, 1, 2, 2, 2, 2, 2],                             
     'horse_name': ['馬A', '馬B', '馬C', '馬D', '馬E', '馬F', '馬G', '馬H', '馬I', '馬J'],
@@ -27,7 +27,7 @@ history_df['speed_vs_average'] = history_df['past_avg_seconds'] - race_means['pa
 # 確保數據按 race_id 嚴格排序
 history_df = history_df.sort_values(by='race_id').reset_index(drop=True)
 
-# 💡 【核心修正】特徵列表和順序，必須與網頁端 app.py 完美對齊！
+# 💡 【終極修正】特徵列表和順序，必須與網頁端 app.py 的特徵陣列完美對齊！
 feature_names = [
     'draw', 'weight_vs_average', 'speed_vs_average',
     'rating_change', 'body_weight', 'recent_avg_rank', 
